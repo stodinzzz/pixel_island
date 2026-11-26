@@ -52,6 +52,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -176,6 +177,9 @@ fun DynamicPillView(
     val pillBottomAnim = remember { Animatable(targetBottom.value) }
     val pillWidthAnim = remember { Animatable(targetWidth.value) }
     val pillCornerAnim = remember { Animatable(targetCornerRadius.value) }
+    val bounceScaleX = remember { Animatable(1f) }
+    val bounceScaleY = remember { Animatable(1f) }
+    var lastHandledPulse by remember { mutableIntStateOf(state.bouncePulseCount) }
 
     val density = LocalDensity.current
     val context = LocalContext.current
@@ -209,6 +213,8 @@ fun DynamicPillView(
                             pillWidthAnim.snapTo(90f)
                             pillCornerAnim.snapTo(18f)
                         }
+                        bounceScaleX.snapTo(1f)
+                        bounceScaleY.snapTo(1f)
                         wasExpanded = false
                         isDraggingCard = false
                     }
@@ -298,6 +304,31 @@ fun DynamicPillView(
         }
     }
 
+    LaunchedEffect(state.isPillPressed, state.bouncePulseCount, state.isExpanded, state.isFaceUnlockActive) {
+        if (state.isExpanded || state.isFaceUnlockActive) {
+            lastHandledPulse = state.bouncePulseCount
+            launch { bounceScaleX.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 500f)) }
+            launch { bounceScaleY.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 500f)) }
+            return@LaunchedEffect
+        }
+        if (state.bouncePulseCount != lastHandledPulse) {
+            lastHandledPulse = state.bouncePulseCount
+            // Effet iPhone Dynamic Island : léger gonflement organique puis retour élastique soyeux
+            val puffX = launch { bounceScaleX.animateTo(1.14f, tween(80, easing = FastOutSlowInEasing)) }
+            val puffY = launch { bounceScaleY.animateTo(1.10f, tween(80, easing = FastOutSlowInEasing)) }
+            joinAll(puffX, puffY)
+            launch { bounceScaleX.animateTo(1f, spring(dampingRatio = 0.42f, stiffness = 420f)) }
+            launch { bounceScaleY.animateTo(1f, spring(dampingRatio = 0.46f, stiffness = 420f)) }
+        } else if (state.isPillPressed) {
+            // Micro gonflement tactile immédiat sous le doigt
+            launch { bounceScaleX.animateTo(1.06f, spring(dampingRatio = 0.72f, stiffness = 560f)) }
+            launch { bounceScaleY.animateTo(1.05f, spring(dampingRatio = 0.72f, stiffness = 560f)) }
+        } else {
+            launch { bounceScaleX.animateTo(1f, spring(dampingRatio = 0.48f, stiffness = 440f)) }
+            launch { bounceScaleY.animateTo(1f, spring(dampingRatio = 0.50f, stiffness = 440f)) }
+        }
+    }
+
     // Lecture différée dans graphicsLayer pour éviter toute recomposition lors du fondu
     val contentAlphaState = animateFloatAsState(
         targetValue = if (isVisible) 1f else 0f,
@@ -332,6 +363,9 @@ fun DynamicPillView(
                 }
                 .graphicsLayer {
                     val radiusDp = pillCornerAnim.value.coerceAtLeast(0f).dp
+                    scaleX = bounceScaleX.value
+                    scaleY = bounceScaleY.value
+                    transformOrigin = TransformOrigin(0.5f, 0.5f)
                     shape = RoundedCornerShape(radiusDp)
                     clip = true
                 }
@@ -768,11 +802,12 @@ fun DynamicPillView(
                                     .pointerInput(Unit) {
                                         detectTapGestures(
                                             onTap = {
-                                                viewModel.onOpenMusicAppClicked()
-                                            },
-                                            onLongPress = {
                                                 HapticFeedbackHelper.performTapticFeedback(context, view)
                                                 viewModel.expandIsland()
+                                            },
+                                            onLongPress = {
+                                                HapticFeedbackHelper.performConfirmationFeedback(context, view)
+                                                viewModel.onOpenMusicAppClicked()
                                             }
                                         )
                                     }

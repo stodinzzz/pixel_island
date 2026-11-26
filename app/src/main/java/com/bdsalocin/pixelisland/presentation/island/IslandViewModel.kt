@@ -119,11 +119,30 @@ class IslandViewModel(
     }
 
     fun onScreenOff() {
+        _uiState.update { it.copy(isPillPressed = false) }
         collapseIsland()
     }
 
     fun onThemeChanged() {
         _uiState.update { it.copy(themeVersion = it.themeVersion + 1) }
+    }
+
+    fun setPillPressed(pressed: Boolean) {
+        if (_uiState.value.isPillPressed != pressed) {
+            _uiState.update { it.copy(isPillPressed = pressed) }
+        }
+    }
+
+    fun triggerIdleBounce() {
+        val current = _uiState.value
+        if (!current.isExpanded && !current.isFaceUnlockActive) {
+            _uiState.update {
+                it.copy(
+                    isPillPressed = false,
+                    bouncePulseCount = it.bouncePulseCount + 1
+                )
+            }
+        }
     }
 
     fun toggleExpand() {
@@ -140,7 +159,7 @@ class IslandViewModel(
     fun expandIsland() {
         if (!_uiState.value.isExpanded) {
             pauseDismissJob?.cancel()
-            _uiState.update { it.copy(isExpanded = true, isPausedGraceActive = false) }
+            _uiState.update { it.copy(isExpanded = true, isPausedGraceActive = false, isPillPressed = false) }
         }
     }
 

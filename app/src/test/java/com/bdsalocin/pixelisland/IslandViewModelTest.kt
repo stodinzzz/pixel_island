@@ -117,4 +117,25 @@ class IslandViewModelTest {
         viewModel.onScreenOff()
         assertFalse(viewModel.uiState.value.isExpanded)
     }
+
+    @Test
+    fun testIdleBounceAndPillPressedState() = runTest {
+        assertEquals(0, viewModel.uiState.value.bouncePulseCount)
+        assertFalse(viewModel.uiState.value.isPillPressed)
+
+        viewModel.setPillPressed(true)
+        assertTrue(viewModel.uiState.value.isPillPressed)
+
+        viewModel.triggerIdleBounce()
+        assertEquals(1, viewModel.uiState.value.bouncePulseCount)
+        assertFalse(viewModel.uiState.value.isPillPressed)
+
+        val track = MediaTrack(title = "Track", artist = "Artist", isPlaying = true)
+        mediaFlow.emit(track)
+        testDispatcher.scheduler.advanceUntilIdle()
+        viewModel.expandIsland()
+
+        viewModel.triggerIdleBounce()
+        assertEquals(1, viewModel.uiState.value.bouncePulseCount)
+    }
 }

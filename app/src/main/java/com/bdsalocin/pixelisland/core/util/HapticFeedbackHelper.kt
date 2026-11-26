@@ -10,36 +10,47 @@ import android.view.View
 
 /**
  * Gestionnaire de retour haptique haute fidelite type Taptic Engine pour Pixel Island.
- * Optimise pour Google Pixel 8 Pro sous Android 14.
+ * Optimise pour le moteur lineaire du Google Pixel 8 Pro sous Android 14+.
  */
 object HapticFeedbackHelper {
 
     /**
-     * Vibration tactile subtile (style Taptic Engine) pour l'appui long sur la pilule compacte.
+     * Micro vibration seche et legere style iPhone lors d'un tap sur la capsule Dynamic Island au repos.
      */
-    fun performTapticFeedback(context: Context, view: View? = null) {
+    fun performIslandBounceFeedback(context: Context, view: View? = null) {
+        if (tryPrimitiveClick(context, scale = 0.52f)) {
+            return
+        }
         val viewFeedbackHandled = try {
             view?.performHapticFeedback(
-                HapticFeedbackConstants.LONG_PRESS,
+                HapticFeedbackConstants.CLOCK_TICK,
                 HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
             ) ?: false
         } catch (_: Exception) {
             false
         }
-
         if (!viewFeedbackHandled) {
-            try {
-                val vibrator = getVibrator(context)
-                if (vibrator != null && vibrator.hasVibrator()) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        val effect = VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK)
-                        vibrator.vibrate(effect)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        vibrator.vibrate(20L)
-                    }
-                }
-            } catch (_: Exception) {}
+            vibratePredefined(context, VibrationEffect.EFFECT_TICK, fallbackDurationMs = 12L)
+        }
+    }
+
+    /**
+     * Vibration tactile nette (style Taptic Engine) lors de l'ouverture de la carte musicale au clic.
+     */
+    fun performTapticFeedback(context: Context, view: View? = null) {
+        if (tryPrimitiveClick(context, scale = 0.72f)) {
+            return
+        }
+        val viewFeedbackHandled = try {
+            view?.performHapticFeedback(
+                HapticFeedbackConstants.CONTEXT_CLICK,
+                HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
+            ) ?: false
+        } catch (_: Exception) {
+            false
+        }
+        if (!viewFeedbackHandled) {
+            vibratePredefined(context, VibrationEffect.EFFECT_CLICK, fallbackDurationMs = 18L)
         }
     }
 
@@ -47,6 +58,9 @@ object HapticFeedbackHelper {
      * Vibration tactile de confirmation pour la fermeture de la carte vers l'ilot compact.
      */
     fun performConfirmationFeedback(context: Context, view: View? = null) {
+        if (tryPrimitiveClick(context, scale = 0.85f)) {
+            return
+        }
         val viewFeedbackHandled = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 view?.performHapticFeedback(
@@ -64,19 +78,42 @@ object HapticFeedbackHelper {
         }
 
         if (!viewFeedbackHandled) {
-            try {
-                val vibrator = getVibrator(context)
-                if (vibrator != null && vibrator.hasVibrator()) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        val effect = VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK)
-                        vibrator.vibrate(effect)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        vibrator.vibrate(30L)
-                    }
-                }
-            } catch (_: Exception) {}
+            vibratePredefined(context, VibrationEffect.EFFECT_HEAVY_CLICK, fallbackDurationMs = 26L)
         }
+    }
+
+    private fun tryPrimitiveClick(context: Context, scale: Float): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        return try {
+            val vibrator = getVibrator(context) ?: return false
+            if (!vibrator.hasVibrator()) return false
+            val supported = vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_CLICK)
+            if (supported) {
+                val composition = VibrationEffect.startComposition()
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, scale.coerceIn(0.1f, 1.0f))
+                    .compose()
+                vibrator.vibrate(composition)
+                true
+            } else {
+                false
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun vibratePredefined(context: Context, effectId: Int, fallbackDurationMs: Long) {
+        try {
+            val vibrator = getVibrator(context)
+            if (vibrator != null && vibrator.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    vibrator.vibrate(VibrationEffect.createPredefined(effectId))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(fallbackDurationMs)
+                }
+            }
+        } catch (_: Exception) {}
     }
 
     private fun getVibrator(context: Context): Vibrator? {
