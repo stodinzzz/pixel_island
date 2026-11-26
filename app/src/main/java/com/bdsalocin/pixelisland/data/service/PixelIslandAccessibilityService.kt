@@ -270,7 +270,7 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
         val initialY = (cutoutCenterY - (pillHeightPx / 2)).coerceAtLeast(0)
 
         val initialFlags = baseFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        val stableWidthPx = (390 * density).toInt()
+        val stableWidthPx = (400 * density).toInt()
         val idleHeightPx = (104 * density).toInt()
 
         // TYPE_ACCESSIBILITY_OVERLAY : Z-order supérieur à la barre d'état système, autorisant les clics sur le poinçon
@@ -299,7 +299,7 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
             private var isExpandedTouchDown = false
             private var isCardMarginTouchDown = false
             private val longPressHandler = Handler(Looper.getMainLooper())
-            private val longPressTimeout = 380L
+            private val longPressTimeout = 320L
             private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
 
             private val longPressRunnable = Runnable {
@@ -307,7 +307,10 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
                 if (state.isMusicActive && !state.isExpanded) {
                     isLongPressTriggered = true
                     HapticFeedbackHelper.performTapticFeedback(this@PixelIslandAccessibilityService, this)
-                    container.islandViewModel.expandIsland()
+                    preExpandWindowForCard()
+                    postOnAnimation {
+                        container.islandViewModel.expandIsland()
+                    }
                 }
             }
 
@@ -456,7 +459,7 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
                         pendingTargetWidth = null
                         pendingTargetHeight = null
                         val density = resources.displayMetrics.density
-                        val targetH = if (s.isMusicActive) (44 * density).toInt() else (104 * density).toInt()
+                        val targetH = if (s.isMusicActive) (48 * density).toInt() else (104 * density).toInt()
                         overlayLayoutParams.height = targetH
                         overlayLayoutParams.flags = if (s.isMusicActive) baseFlags else (baseFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
                         rootLayout?.let { view ->
@@ -492,6 +495,26 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
         serviceScope.launch {
             container.islandViewModel.uiState.collect {
                 updateWindowLayoutForState()
+            }
+        }
+    }
+
+    private fun preExpandWindowForCard() {
+        val density = resources.displayMetrics.density
+        val targetW = (400 * density).toInt()
+        val targetH = (256 * density).toInt()
+        val targetFlags = baseFlags or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+        if (overlayLayoutParams.width != targetW || overlayLayoutParams.height != targetH || overlayLayoutParams.flags != targetFlags) {
+            resizeJob?.cancel()
+            pendingTargetWidth = null
+            pendingTargetHeight = null
+            overlayLayoutParams.width = maxOf(overlayLayoutParams.width, targetW)
+            overlayLayoutParams.height = maxOf(overlayLayoutParams.height, targetH)
+            overlayLayoutParams.flags = targetFlags
+            rootLayout?.let { view ->
+                try {
+                    windowManager.updateViewLayout(view, overlayLayoutParams)
+                } catch (_: Exception) {}
             }
         }
     }
@@ -537,22 +560,22 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
 
         when {
             state.isFaceUnlockActive -> {
-                targetWindowWidth = (390 * density).toInt()
+                targetWindowWidth = (400 * density).toInt()
                 targetWindowHeight = (104 * density).toInt()
                 targetFlags = baseFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             }
             shouldBeExpanded -> {
-                targetWindowWidth = (390 * density).toInt()
-                targetWindowHeight = (244 * density).toInt()
+                targetWindowWidth = (400 * density).toInt()
+                targetWindowHeight = (256 * density).toInt()
                 targetFlags = baseFlags or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
             }
             state.isMusicActive -> {
-                targetWindowWidth = (390 * density).toInt()
-                targetWindowHeight = (44 * density).toInt()
+                targetWindowWidth = (400 * density).toInt()
+                targetWindowHeight = (48 * density).toInt()
                 targetFlags = baseFlags
             }
             else -> {
-                targetWindowWidth = (390 * density).toInt()
+                targetWindowWidth = (400 * density).toInt()
                 targetWindowHeight = (104 * density).toInt()
                 targetFlags = baseFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             }
@@ -603,7 +626,7 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
                 pendingTargetWidth = targetWindowWidth
                 pendingTargetHeight = targetWindowHeight
                 resizeJob = serviceScope.launch {
-                    kotlinx.coroutines.delay(320)
+                    kotlinx.coroutines.delay(420)
                     pendingTargetWidth = null
                     pendingTargetHeight = null
                     overlayLayoutParams.width = targetWindowWidth

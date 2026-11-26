@@ -1,11 +1,16 @@
 package com.bdsalocin.pixelisland.presentation.island
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
+import android.os.PowerManager
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
@@ -34,19 +39,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import com.bdsalocin.pixelisland.domain.model.BiometricStatus
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
-import android.os.Build
-import android.os.PowerManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -57,8 +56,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -72,23 +69,25 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bdsalocin.pixelisland.core.util.HapticFeedbackHelper
-import kotlinx.coroutines.joinAll
-import kotlinx.coroutines.launch
+import com.bdsalocin.pixelisland.domain.model.BiometricStatus
 import com.bdsalocin.pixelisland.presentation.island.components.ApplePlayPauseIcon
 import com.bdsalocin.pixelisland.presentation.island.components.AppleSkipNextIcon
 import com.bdsalocin.pixelisland.presentation.island.components.AppleSkipPreviousIcon
 import com.bdsalocin.pixelisland.presentation.island.components.EqualizerBars
 import com.bdsalocin.pixelisland.presentation.island.components.FaceUnlockScanner
 import com.bdsalocin.pixelisland.presentation.theme.rememberDeviceAccentColor
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
 
 enum class IslandStage {
     FACE_UNLOCK,
@@ -146,15 +145,32 @@ fun DynamicPillView(
         else -> 18.dp
     }
 
-    // Amortissement critique sans rebond (DampingRatioNoBouncy) pour une fluidité absolue à 120 FPS
-    val pillSpringSpec = spring<Float>(
-        dampingRatio = Spring.DampingRatioNoBouncy,
-        stiffness = 450f
-    )
-    val faceOpenSpringSpec = spring<Float>(
-        dampingRatio = Spring.DampingRatioNoBouncy,
-        stiffness = 380f
-    )
+    // Ressorts organiques calibrés style iOS Dynamic Island à 120 FPS :
+    // Largeur légèrement en avance sur la hauteur à l'ouverture pour un déploiement liquide et naturel
+    val musicCompactWidthSpring = remember {
+        spring<Float>(dampingRatio = 0.78f, stiffness = 340f)
+    }
+    val musicCompactVerticalSpring = remember {
+        spring<Float>(dampingRatio = 0.82f, stiffness = 360f)
+    }
+    val musicExpandWidthSpring = remember {
+        spring<Float>(dampingRatio = 0.80f, stiffness = 380f)
+    }
+    val musicExpandHeightSpring = remember {
+        spring<Float>(dampingRatio = 0.80f, stiffness = 310f)
+    }
+    val musicExpandCornerSpring = remember {
+        spring<Float>(dampingRatio = 0.82f, stiffness = 320f)
+    }
+    val musicCollapseSpring = remember {
+        spring<Float>(dampingRatio = 0.92f, stiffness = 460f)
+    }
+    val musicHideSpring = remember {
+        spring<Float>(dampingRatio = 0.88f, stiffness = 380f)
+    }
+    val faceOpenSpringSpec = remember {
+        spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 380f)
+    }
 
     val pillTopAnim = remember { Animatable(targetTop.value) }
     val pillBottomAnim = remember { Animatable(targetBottom.value) }
@@ -170,7 +186,6 @@ fun DynamicPillView(
     }
 
     var isDraggingCard by remember { mutableStateOf(false) }
-    var isOpeningCard by remember { mutableStateOf(false) }
     var wasExpanded by remember { mutableStateOf(false) }
     val velocityTracker = remember { VelocityTracker() }
 
@@ -196,7 +211,6 @@ fun DynamicPillView(
                         }
                         wasExpanded = false
                         isDraggingCard = false
-                        isOpeningCard = false
                     }
                 }
             }
@@ -214,12 +228,6 @@ fun DynamicPillView(
         }
     }
 
-    // Animation fluide calibrée à 260 ms pour le repli de la carte sans queue asymptotique
-    val collapseTweenSpec = tween<Float>(
-        durationMillis = 260,
-        easing = FastOutSlowInEasing
-    )
-
     LaunchedEffect(targetTop.value, targetBottom.value, targetWidth.value, targetCornerRadius.value) {
         if (!isDraggingCard) {
             val isInteractive = powerManager?.isInteractive != false
@@ -231,58 +239,70 @@ fun DynamicPillView(
                 wasExpanded = false
                 return@LaunchedEffect
             }
+            val isOpeningExpandedCard = state.isExpanded && targetWidth.value >= 380f
             val isCollapsingCard = (wasExpanded || pillWidthAnim.value > 180.5f) &&
                     targetWidth.value == 180f && targetBottom.value == 40f
-            val animSpec = when {
-                isCollapsingCard -> collapseTweenSpec
+            val isOpeningCompactMusic = !state.isExpanded && !state.isFaceUnlockActive &&
+                    state.isMusicActive && pillWidthAnim.value < 179.5f
+
+            val topSpec = when {
                 state.isFaceUnlockActive -> faceOpenSpringSpec
-                else -> pillSpringSpec
+                isOpeningExpandedCard -> musicExpandHeightSpring
+                isCollapsingCard -> musicCollapseSpring
+                isOpeningCompactMusic -> musicCompactVerticalSpring
+                else -> musicHideSpring
             }
-            launch { pillTopAnim.animateTo(targetTop.value, animSpec) }
-            launch { pillBottomAnim.animateTo(targetBottom.value, animSpec) }
-            launch { pillWidthAnim.animateTo(targetWidth.value, animSpec) }
-            launch { pillCornerAnim.animateTo(targetCornerRadius.value, animSpec) }
-            if (state.isExpanded) {
-                wasExpanded = true
-            } else {
-                wasExpanded = false
+            val bottomSpec = when {
+                state.isFaceUnlockActive -> faceOpenSpringSpec
+                isOpeningExpandedCard -> musicExpandHeightSpring
+                isCollapsingCard -> musicCollapseSpring
+                isOpeningCompactMusic -> musicCompactVerticalSpring
+                else -> musicHideSpring
             }
+            val widthSpec = when {
+                state.isFaceUnlockActive -> faceOpenSpringSpec
+                isOpeningExpandedCard -> musicExpandWidthSpring
+                isCollapsingCard -> musicCollapseSpring
+                isOpeningCompactMusic -> musicCompactWidthSpring
+                else -> musicHideSpring
+            }
+            val cornerSpec = when {
+                state.isFaceUnlockActive -> faceOpenSpringSpec
+                isOpeningExpandedCard -> musicExpandCornerSpring
+                isCollapsingCard -> musicCollapseSpring
+                isOpeningCompactMusic -> musicCompactVerticalSpring
+                else -> musicHideSpring
+            }
+
+            launch { pillTopAnim.animateTo(targetTop.value, topSpec) }
+            launch { pillBottomAnim.animateTo(targetBottom.value, bottomSpec) }
+            launch { pillWidthAnim.animateTo(targetWidth.value, widthSpec) }
+            launch { pillCornerAnim.animateTo(targetCornerRadius.value, cornerSpec) }
+            wasExpanded = state.isExpanded
         }
     }
 
     LaunchedEffect(state.isExpanded) {
         if (state.isExpanded) {
             wasExpanded = true
-            isOpeningCard = true
-            snapshotFlow { pillBottomAnim.value }
-                .first { it >= 237.5f }
-            isOpeningCard = false
-        } else {
-            isOpeningCard = false
-            if (isDraggingCard) {
-                isDraggingCard = false
-                val isCollapsingCard = (wasExpanded || pillWidthAnim.value > 180.5f) &&
-                        targetWidth.value == 180f && targetBottom.value == 40f
-                val animSpec = if (isCollapsingCard) collapseTweenSpec else pillSpringSpec
-                launch { pillTopAnim.animateTo(targetTop.value, animSpec) }
-                launch { pillBottomAnim.animateTo(targetBottom.value, animSpec) }
-                launch { pillWidthAnim.animateTo(targetWidth.value, animSpec) }
-                launch { pillCornerAnim.animateTo(targetCornerRadius.value, animSpec) }
-                wasExpanded = false
-            }
+        } else if (isDraggingCard) {
+            isDraggingCard = false
+            val isCollapsingCard = (wasExpanded || pillWidthAnim.value > 180.5f) &&
+                    targetWidth.value == 180f && targetBottom.value == 40f
+            val spec = if (isCollapsingCard) musicCollapseSpring else musicHideSpring
+            launch { pillTopAnim.animateTo(targetTop.value, spec) }
+            launch { pillBottomAnim.animateTo(targetBottom.value, spec) }
+            launch { pillWidthAnim.animateTo(targetWidth.value, spec) }
+            launch { pillCornerAnim.animateTo(targetCornerRadius.value, spec) }
+            wasExpanded = false
         }
     }
 
-    val currentTop = pillTopAnim.value.dp
-    val currentPillBottom = pillBottomAnim.value.dp
-    val currentPillWidth = pillWidthAnim.value.dp
-    val currentPillCornerRadius = pillCornerAnim.value.dp
-    val currentHeight = (currentPillBottom - currentTop).coerceAtLeast(0.dp)
-
-    val contentAlpha by animateFloatAsState(
+    // Lecture différée dans graphicsLayer pour éviter toute recomposition lors du fondu
+    val contentAlphaState = animateFloatAsState(
         targetValue = if (isVisible) 1f else 0f,
         animationSpec = tween(
-            durationMillis = if (isVisible) 180 else 180,
+            durationMillis = if (isVisible) 200 else 150,
             easing = FastOutSlowInEasing
         ),
         label = "ContentAlphaAnimation"
@@ -292,119 +312,193 @@ fun DynamicPillView(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.TopCenter
     ) {
-        if (currentPillWidth > 0.5.dp && currentHeight > 0.5.dp) {
+        // Conteneur morphing 100% différé (phases Layout et Draw/Layer uniquement) :
+        // aucune recomposition de l'arbre Compose pendant les 120 images par seconde d'animation
+        Box(
+            modifier = modifier
+                .layout { measurable, constraints ->
+                    val maxW = if (constraints.hasBoundedWidth) constraints.maxWidth else Int.MAX_VALUE
+                    val maxH = if (constraints.hasBoundedHeight) constraints.maxHeight else Int.MAX_VALUE
+                    val topPx = pillTopAnim.value.dp.roundToPx().coerceIn(0, maxH)
+                    val bottomPx = pillBottomAnim.value.dp.roundToPx().coerceIn(topPx, maxH)
+                    val widthPx = pillWidthAnim.value.dp.roundToPx().coerceIn(0, maxW)
+                    val heightPx = (bottomPx - topPx).coerceAtLeast(0)
+                    val placeable = measurable.measure(
+                        Constraints.fixed(widthPx, heightPx)
+                    )
+                    layout(widthPx, topPx + heightPx) {
+                        placeable.place(0, topPx)
+                    }
+                }
+                .graphicsLayer {
+                    val radiusDp = pillCornerAnim.value.coerceAtLeast(0f).dp
+                    shape = RoundedCornerShape(radiusDp)
+                    clip = true
+                }
+                .background(Color.Black),
+            contentAlignment = Alignment.TopCenter
+        ) {
             Box(
-                modifier = modifier
-                    .padding(top = currentTop)
-                    .width(currentPillWidth)
-                    .height(currentHeight)
-                    .clip(RoundedCornerShape(currentPillCornerRadius))
-                    .background(Color.Black),
-                contentAlignment = Alignment.TopCenter
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = contentAlphaState.value }
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer { alpha = contentAlpha }
-                ) {
-                    AnimatedContent(
-                        targetState = currentStage,
-                        contentAlignment = Alignment.TopCenter,
-                        transitionSpec = {
-                            when {
-                                initialState == IslandStage.COMPACT_MUSIC && targetState == IslandStage.EXPANDED_CARD -> {
-                                    (fadeIn(animationSpec = tween(180, delayMillis = 50, easing = FastOutSlowInEasing)) +
-                                            scaleIn(
-                                                initialScale = 0.94f,
-                                                animationSpec = tween(180, delayMillis = 50, easing = FastOutSlowInEasing),
-                                                transformOrigin = TransformOrigin(0.5f, 0f)
-                                            ))
-                                        .togetherWith(fadeOut(animationSpec = tween(90, easing = FastOutSlowInEasing)))
-                                        .using(SizeTransform(clip = false) { _, _ -> snap() })
-                                }
-                                initialState == IslandStage.EXPANDED_CARD && targetState == IslandStage.COMPACT_MUSIC -> {
-                                    fadeIn(animationSpec = tween(100, delayMillis = 260, easing = FastOutSlowInEasing))
-                                        .togetherWith(fadeOut(animationSpec = tween(90, easing = FastOutSlowInEasing)))
-                                        .using(SizeTransform(clip = false) { _, _ -> snap() })
-                                }
-                                initialState == IslandStage.FACE_UNLOCK && (targetState == IslandStage.COMPACT_MUSIC || targetState == IslandStage.EXPANDED_CARD) -> {
-                                    fadeIn(animationSpec = tween(140, delayMillis = 180, easing = FastOutSlowInEasing))
-                                        .togetherWith(
-                                            scaleOut(
-                                                targetScale = 0.2f,
-                                                transformOrigin = TransformOrigin(0.5f, 0.21f),
-                                                animationSpec = tween(160, easing = FastOutSlowInEasing)
-                                            ) + fadeOut(animationSpec = tween(140, easing = FastOutSlowInEasing))
-                                        )
-                                        .using(SizeTransform(clip = false) { _, _ -> snap() })
-                                }
-                                initialState == IslandStage.FACE_UNLOCK && targetState == IslandStage.HIDDEN -> {
-                                    fadeIn(animationSpec = tween(100))
-                                        .togetherWith(
-                                            scaleOut(
-                                                targetScale = 0.1f,
-                                                transformOrigin = TransformOrigin(0.5f, 0.21f),
-                                                animationSpec = tween(180, easing = FastOutSlowInEasing)
-                                            ) + fadeOut(animationSpec = tween(180, easing = FastOutSlowInEasing))
-                                        )
-                                        .using(SizeTransform(clip = false) { _, _ -> snap() })
-                                }
-                                targetState == IslandStage.FACE_UNLOCK -> {
-                                    fadeIn(animationSpec = tween(150, delayMillis = 35, easing = FastOutSlowInEasing))
-                                        .togetherWith(fadeOut(animationSpec = tween(80)))
-                                        .using(SizeTransform(clip = false) { _, _ -> snap() })
-                                }
-                                else -> {
-                                    fadeIn(animationSpec = tween(160, easing = FastOutSlowInEasing))
-                                        .togetherWith(fadeOut(animationSpec = tween(100, easing = FastOutSlowInEasing)))
-                                        .using(SizeTransform(clip = false) { _, _ -> snap() })
-                                }
+                AnimatedContent(
+                    targetState = currentStage,
+                    contentAlignment = Alignment.TopCenter,
+                    transitionSpec = {
+                        when {
+                            initialState == IslandStage.HIDDEN && targetState == IslandStage.COMPACT_MUSIC -> {
+                                (fadeIn(animationSpec = tween(210, delayMillis = 55, easing = FastOutSlowInEasing)) +
+                                        scaleIn(
+                                            initialScale = 0.80f,
+                                            transformOrigin = TransformOrigin(0.5f, 0.5f),
+                                            animationSpec = spring(dampingRatio = 0.82f, stiffness = 340f)
+                                        ))
+                                    .togetherWith(fadeOut(animationSpec = tween(60, easing = FastOutSlowInEasing)))
+                                    .using(SizeTransform(clip = false) { _, _ -> snap() })
                             }
-                        },
-                        label = "IslandContentTransition"
-                    ) { stage ->
-                        when (stage) {
-                            // Vue Déverrouillage Visage (Carré arrondi 96dp fixe sans rebond ni compression interne)
-                            IslandStage.FACE_UNLOCK -> {
-                                Box(
-                                    modifier = Modifier
-                                        .wrapContentSize(align = Alignment.TopCenter, unbounded = true)
-                                        .size(96.dp)
-                                        .padding(top = 34.dp, bottom = 10.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    FaceUnlockScanner(
-                                        status = state.biometricStatus,
-                                        isUnlocked = (state.biometricStatus == BiometricStatus.SUCCESS),
-                                        accentColor = deviceAccentColor
+                            initialState == IslandStage.COMPACT_MUSIC && targetState == IslandStage.HIDDEN -> {
+                                fadeIn(animationSpec = tween(80))
+                                    .togetherWith(
+                                        fadeOut(animationSpec = tween(110, easing = FastOutSlowInEasing)) +
+                                                scaleOut(
+                                                    targetScale = 0.80f,
+                                                    transformOrigin = TransformOrigin(0.5f, 0.5f),
+                                                    animationSpec = tween(110, easing = FastOutSlowInEasing)
+                                                )
                                     )
-                                }
+                                    .using(SizeTransform(clip = false) { _, _ -> snap() })
+                            }
+                            initialState == IslandStage.COMPACT_MUSIC && targetState == IslandStage.EXPANDED_CARD -> {
+                                (fadeIn(animationSpec = tween(210, delayMillis = 65, easing = FastOutSlowInEasing)) +
+                                        scaleIn(
+                                            initialScale = 0.82f,
+                                            transformOrigin = TransformOrigin(0.5f, 0.08f),
+                                            animationSpec = spring(dampingRatio = 0.84f, stiffness = 340f)
+                                        ))
+                                    .togetherWith(
+                                        fadeOut(animationSpec = tween(75, easing = FastOutSlowInEasing)) +
+                                                scaleOut(
+                                                    targetScale = 0.88f,
+                                                    transformOrigin = TransformOrigin(0.5f, 0.5f),
+                                                    animationSpec = tween(75, easing = FastOutSlowInEasing)
+                                                )
+                                    )
+                                    .using(SizeTransform(clip = false) { _, _ -> snap() })
+                            }
+                            initialState == IslandStage.EXPANDED_CARD && targetState == IslandStage.COMPACT_MUSIC -> {
+                                (fadeIn(animationSpec = tween(150, delayMillis = 115, easing = FastOutSlowInEasing)) +
+                                        scaleIn(
+                                            initialScale = 0.86f,
+                                            transformOrigin = TransformOrigin(0.5f, 0.5f),
+                                            animationSpec = tween(170, delayMillis = 115, easing = FastOutSlowInEasing)
+                                        ))
+                                    .togetherWith(
+                                        fadeOut(animationSpec = tween(85, easing = FastOutSlowInEasing)) +
+                                                scaleOut(
+                                                    targetScale = 0.90f,
+                                                    transformOrigin = TransformOrigin(0.5f, 0.05f),
+                                                    animationSpec = tween(85, easing = FastOutSlowInEasing)
+                                                )
+                                    )
+                                    .using(SizeTransform(clip = false) { _, _ -> snap() })
+                            }
+                            initialState == IslandStage.FACE_UNLOCK && (targetState == IslandStage.COMPACT_MUSIC || targetState == IslandStage.EXPANDED_CARD) -> {
+                                (fadeIn(animationSpec = tween(180, delayMillis = 140, easing = FastOutSlowInEasing)) +
+                                        scaleIn(
+                                            initialScale = 0.84f,
+                                            transformOrigin = TransformOrigin(0.5f, 0.5f),
+                                            animationSpec = spring(dampingRatio = 0.84f, stiffness = 360f)
+                                        ))
+                                    .togetherWith(
+                                        scaleOut(
+                                            targetScale = 0.2f,
+                                            transformOrigin = TransformOrigin(0.5f, 0.21f),
+                                            animationSpec = tween(160, easing = FastOutSlowInEasing)
+                                        ) + fadeOut(animationSpec = tween(140, easing = FastOutSlowInEasing))
+                                    )
+                                    .using(SizeTransform(clip = false) { _, _ -> snap() })
+                            }
+                            initialState == IslandStage.FACE_UNLOCK && targetState == IslandStage.HIDDEN -> {
+                                fadeIn(animationSpec = tween(100))
+                                    .togetherWith(
+                                        scaleOut(
+                                            targetScale = 0.1f,
+                                            transformOrigin = TransformOrigin(0.5f, 0.21f),
+                                            animationSpec = tween(180, easing = FastOutSlowInEasing)
+                                        ) + fadeOut(animationSpec = tween(180, easing = FastOutSlowInEasing))
+                                    )
+                                    .using(SizeTransform(clip = false) { _, _ -> snap() })
+                            }
+                            targetState == IslandStage.FACE_UNLOCK -> {
+                                fadeIn(animationSpec = tween(150, delayMillis = 35, easing = FastOutSlowInEasing))
+                                    .togetherWith(fadeOut(animationSpec = tween(80)))
+                                    .using(SizeTransform(clip = false) { _, _ -> snap() })
+                            }
+                            else -> {
+                                fadeIn(animationSpec = tween(160, easing = FastOutSlowInEasing))
+                                    .togetherWith(fadeOut(animationSpec = tween(100, easing = FastOutSlowInEasing)))
+                                    .using(SizeTransform(clip = false) { _, _ -> snap() })
+                            }
+                        }
+                    },
+                    label = "IslandContentTransition"
+                ) { stage ->
+                    when (stage) {
+                        // Vue Déverrouillage Visage (Carré arrondi 96dp fixe sans rebond ni compression interne)
+                        IslandStage.FACE_UNLOCK -> {
+                            Box(
+                                modifier = Modifier
+                                    .wrapContentSize(align = Alignment.TopCenter, unbounded = true)
+                                    .size(96.dp)
+                                    .padding(top = 34.dp, bottom = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                FaceUnlockScanner(
+                                    status = state.biometricStatus,
+                                    isUnlocked = (state.biometricStatus == BiometricStatus.SUCCESS),
+                                    accentColor = deviceAccentColor
+                                )
+                            }
+                        }
+
+                        // Vue Musique Détaillée (Dimensions fixes 384x238dp sans écrasement ni reflow de texte à l'ouverture)
+                        IslandStage.EXPANDED_CARD -> {
+                            val track = state.mediaTrack
+                            val albumBitmap = remember(track?.albumArt) {
+                                track?.albumArt?.asImageBitmap()
                             }
 
-                            // Vue Musique Détaillée (Grande carte étirée sur les côtés, pochette 64dp, titre 18sp, scrubbing et icônes Apple)
-                            IslandStage.EXPANDED_CARD -> {
-                                val track = state.mediaTrack
-                                val dragFraction = ((238f - pillBottomAnim.value) / 198f).coerceIn(0f, 1f)
-                                val dragContentScale = if (isOpeningCard) 1f else (1f - dragFraction * 0.12f).coerceIn(0.88f, 1f)
-                                val dragContentAlpha = if (isOpeningCard) 1f else (1f - dragFraction * 0.45f).coerceIn(0f, 1f)
-
+                            Box(
+                                modifier = Modifier
+                                    .wrapContentSize(align = Alignment.TopCenter, unbounded = true)
+                                    .requiredSize(width = 384.dp, height = 238.dp)
+                                    .graphicsLayer {
+                                        if (isDraggingCard) {
+                                            val dragFraction = ((238f - pillBottomAnim.value) / 198f).coerceIn(0f, 1f)
+                                            val dragScale = (1f - dragFraction * 0.12f).coerceIn(0.88f, 1f)
+                                            val dragAlpha = (1f - dragFraction * 0.45f).coerceIn(0f, 1f)
+                                            scaleX = dragScale
+                                            scaleY = dragScale
+                                            alpha = dragAlpha
+                                        } else {
+                                            scaleX = 1f
+                                            scaleY = 1f
+                                            alpha = 1f
+                                        }
+                                        transformOrigin = TransformOrigin(0.5f, 0f)
+                                    }
+                            ) {
                                 Column(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(238.dp)
-                                        .graphicsLayer {
-                                            scaleX = dragContentScale
-                                            scaleY = dragContentScale
-                                            alpha = dragContentAlpha
-                                            transformOrigin = TransformOrigin(0.5f, 0f)
-                                        }
+                                        .fillMaxSize()
                                         .pointerInput(state.isExpanded) {
                                             if (!state.isExpanded) return@pointerInput
                                             detectVerticalDragGestures(
                                                 onDragStart = {
                                                     velocityTracker.resetTracking()
                                                     isDraggingCard = true
-                                                    isOpeningCard = false
                                                 },
                                                 onDragEnd = {
                                                     val velocityY = velocityTracker.calculateVelocity().y
@@ -421,8 +515,8 @@ fun DynamicPillView(
                                                                 pillBottomAnim.animateTo(
                                                                     targetValue = 238f,
                                                                     animationSpec = spring(
-                                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                                        stiffness = 450f
+                                                                        dampingRatio = 0.76f,
+                                                                        stiffness = 380f
                                                                     )
                                                                 )
                                                             }
@@ -430,8 +524,8 @@ fun DynamicPillView(
                                                                 pillWidthAnim.animateTo(
                                                                     targetValue = 384f,
                                                                     animationSpec = spring(
-                                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                                        stiffness = 450f
+                                                                        dampingRatio = 0.76f,
+                                                                        stiffness = 380f
                                                                     )
                                                                 )
                                                             }
@@ -439,8 +533,8 @@ fun DynamicPillView(
                                                                 pillCornerAnim.animateTo(
                                                                     targetValue = 40f,
                                                                     animationSpec = spring(
-                                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                                        stiffness = 450f
+                                                                        dampingRatio = 0.76f,
+                                                                        stiffness = 380f
                                                                     )
                                                                 )
                                                             }
@@ -455,8 +549,8 @@ fun DynamicPillView(
                                                             pillBottomAnim.animateTo(
                                                                 targetValue = 238f,
                                                                 animationSpec = spring(
-                                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                                    stiffness = 450f
+                                                                    dampingRatio = 0.76f,
+                                                                    stiffness = 380f
                                                                 )
                                                             )
                                                         }
@@ -464,8 +558,8 @@ fun DynamicPillView(
                                                             pillWidthAnim.animateTo(
                                                                 targetValue = 384f,
                                                                 animationSpec = spring(
-                                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                                    stiffness = 450f
+                                                                    dampingRatio = 0.76f,
+                                                                    stiffness = 380f
                                                                 )
                                                             )
                                                         }
@@ -473,8 +567,8 @@ fun DynamicPillView(
                                                             pillCornerAnim.animateTo(
                                                                 targetValue = 40f,
                                                                 animationSpec = spring(
-                                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                                    stiffness = 450f
+                                                                    dampingRatio = 0.76f,
+                                                                    stiffness = 380f
                                                                 )
                                                             )
                                                         }
@@ -519,10 +613,9 @@ fun DynamicPillView(
                                                     viewModel.onOpenMusicAppClicked()
                                                 }
                                         ) {
-                                            val albumArt = track?.albumArt
-                                            if (albumArt != null) {
+                                            if (albumBitmap != null) {
                                                 Image(
-                                                    bitmap = albumArt.asImageBitmap(),
+                                                    bitmap = albumBitmap,
                                                     contentDescription = "Pochette d'album",
                                                     modifier = Modifier
                                                         .size(64.dp)
@@ -660,82 +753,85 @@ fun DynamicPillView(
                                     }
                                 }
                             }
+                        }
 
-                            // Vue Musique Compacte (Pochette d'album à GAUCHE, barres de son à DROITE)
-                            IslandStage.COMPACT_MUSIC -> {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(40.dp)
-                                        .pointerInput(Unit) {
-                                            detectTapGestures(
-                                                onTap = {
-                                                    viewModel.onOpenMusicAppClicked()
-                                                },
-                                                onLongPress = {
-                                                    HapticFeedbackHelper.performTapticFeedback(context, view)
-                                                    viewModel.expandIsland()
-                                                }
-                                            )
-                                        }
-                                        .padding(horizontal = 12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    // Côté gauche : Aile de la pochette d'album
-                                    val miniature = state.mediaTrack?.albumArt
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight(),
-                                        contentAlignment = Alignment.CenterStart
-                                    ) {
-                                        if (miniature != null) {
-                                            Image(
-                                                bitmap = miniature.asImageBitmap(),
-                                                contentDescription = "Pochette miniature",
-                                                modifier = Modifier
-                                                    .size(26.dp)
-                                                    .clip(CircleShape)
-                                            )
-                                        } else {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(26.dp)
-                                                    .clip(CircleShape)
-                                                    .background(
-                                                        Brush.linearGradient(
-                                                            listOf(Color(0xFF6366F1), Color(0xFFEC4899))
-                                                        )
-                                                    ),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text("♪", color = Color.White, fontSize = 12.sp)
+                        // Vue Musique Compacte (Dimensions fixes 180x40dp sans écrasement des ailes pendant le déploiement)
+                        IslandStage.COMPACT_MUSIC -> {
+                            val compactBitmap = remember(state.mediaTrack?.albumArt) {
+                                state.mediaTrack?.albumArt?.asImageBitmap()
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .wrapContentSize(align = Alignment.TopCenter, unbounded = true)
+                                    .requiredSize(width = 180.dp, height = 40.dp)
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onTap = {
+                                                viewModel.onOpenMusicAppClicked()
+                                            },
+                                            onLongPress = {
+                                                HapticFeedbackHelper.performTapticFeedback(context, view)
+                                                viewModel.expandIsland()
                                             }
-                                        }
-                                    }
-
-                                    // Centre : Espace neutre réservé pour le poinçon de la caméra frontale
-                                    Spacer(modifier = Modifier.width(36.dp))
-
-                                    // Côté droit : Aile des barres de son (égaliseur)
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight(),
-                                        contentAlignment = Alignment.CenterEnd
-                                    ) {
-                                        EqualizerBars(
-                                            isPlaying = state.mediaTrack?.isPlaying == true,
-                                            barColor = deviceAccentColor
                                         )
                                     }
+                                    .padding(horizontal = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Côté gauche : Aile de la pochette d'album
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    if (compactBitmap != null) {
+                                        Image(
+                                            bitmap = compactBitmap,
+                                            contentDescription = "Pochette miniature",
+                                            modifier = Modifier
+                                                .size(26.dp)
+                                                .clip(CircleShape)
+                                        )
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(26.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    Brush.linearGradient(
+                                                        listOf(Color(0xFF6366F1), Color(0xFFEC4899))
+                                                    )
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text("♪", color = Color.White, fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+
+                                // Centre : Espace neutre réservé pour le poinçon de la caméra frontale
+                                Spacer(modifier = Modifier.width(36.dp))
+
+                                // Côté droit : Aile des barres de son (égaliseur)
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                    contentAlignment = Alignment.CenterEnd
+                                ) {
+                                    EqualizerBars(
+                                        isPlaying = state.mediaTrack?.isPlaying == true,
+                                        barColor = deviceAccentColor
+                                    )
                                 }
                             }
+                        }
 
-                            IslandStage.HIDDEN -> {
-                                Spacer(modifier = Modifier.fillMaxSize())
-                            }
+                        IslandStage.HIDDEN -> {
+                            Spacer(modifier = Modifier.fillMaxSize())
                         }
                     }
                 }
