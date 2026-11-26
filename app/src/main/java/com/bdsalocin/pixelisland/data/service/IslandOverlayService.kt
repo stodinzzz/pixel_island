@@ -380,7 +380,7 @@ class IslandOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner 
                         pendingTargetWidth = null
                         pendingTargetHeight = null
                         val density = resources.displayMetrics.density
-                        val targetW = if (s.isMusicActive) (196 * density).toInt() else (400 * density).toInt()
+                        val targetW = (400 * density).toInt()
                         val targetH = if (s.isMusicActive) (48 * density).toInt() else (104 * density).toInt()
                         overlayLayoutParams.width = targetW
                         overlayLayoutParams.height = targetH
@@ -497,7 +497,7 @@ class IslandOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner 
                 targetFlags = baseFlags or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
             }
             state.isMusicActive -> {
-                targetWindowWidth = (196 * density).toInt()
+                targetWindowWidth = (400 * density).toInt()
                 targetWindowHeight = (48 * density).toInt()
                 targetFlags = baseFlags
             }
@@ -507,9 +507,9 @@ class IslandOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner 
                 targetFlags = baseFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             }
             else -> {
-                targetWindowWidth = (116 * density).toInt()
+                targetWindowWidth = (400 * density).toInt()
                 targetWindowHeight = (46 * density).toInt()
-                targetFlags = baseFlags
+                targetFlags = baseFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             }
         }
 

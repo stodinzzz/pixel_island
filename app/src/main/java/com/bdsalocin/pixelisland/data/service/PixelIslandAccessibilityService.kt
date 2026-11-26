@@ -297,6 +297,7 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
             private var startTime = 0L
             private var isLongPressTriggered = false
             private var isSwipeDownHandled = false
+            private var isDownOnPill = false
             private var isExpandedTouchDown = false
             private var isCardMarginTouchDown = false
             private val longPressHandler = Handler(Looper.getMainLooper())
@@ -367,25 +368,25 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
                 if (state.isMusicActive) {
                     val pillWidthPx = 186f * d
                     val pillHeightPx = 46f * d
-                    val currentW = if (width > 0) width.toFloat() else pillWidthPx
+                    val currentW = if (width > 0) width.toFloat() else (400f * d)
                     val pillLeft = (currentW - pillWidthPx) / 2f
                     val pillRight = (currentW + pillWidthPx) / 2f
                     val isTouchOnPill = event.x in pillLeft..pillRight && event.y in 0f..pillHeightPx
 
                     when (event.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
-                            if (!isTouchOnPill) {
-                                return false
-                            }
                             startRawX = event.rawX
                             startRawY = event.rawY
                             startTime = System.currentTimeMillis()
                             isLongPressTriggered = false
                             isSwipeDownHandled = false
                             isExpandedTouchDown = false
-                            container.islandViewModel.setPillPressed(true)
+                            isDownOnPill = isTouchOnPill
                             longPressHandler.removeCallbacks(longPressRunnable)
-                            longPressHandler.postDelayed(longPressRunnable, longPressTimeout)
+                            if (isTouchOnPill) {
+                                container.islandViewModel.setPillPressed(true)
+                                longPressHandler.postDelayed(longPressRunnable, longPressTimeout)
+                            }
                             return true
                         }
                         MotionEvent.ACTION_MOVE -> {
@@ -393,9 +394,11 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
                             val dy = event.rawY - startRawY
                             if (kotlin.math.abs(dx) > touchSlop || kotlin.math.abs(dy) > touchSlop) {
                                 longPressHandler.removeCallbacks(longPressRunnable)
-                                container.islandViewModel.setPillPressed(false)
+                                if (isDownOnPill) {
+                                    container.islandViewModel.setPillPressed(false)
+                                }
                             }
-                            if (!isSwipeDownHandled && dy > touchSlop * 2f && dy > kotlin.math.abs(dx) * 1.3f) {
+                            if (!isSwipeDownHandled && dy > touchSlop * 1.5f && dy > kotlin.math.abs(dx) * 1.2f) {
                                 isSwipeDownHandled = true
                                 performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
                             }
@@ -403,8 +406,10 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
                         }
                         MotionEvent.ACTION_UP -> {
                             longPressHandler.removeCallbacks(longPressRunnable)
-                            container.islandViewModel.setPillPressed(false)
-                            if (!isLongPressTriggered && !isSwipeDownHandled) {
+                            if (isDownOnPill) {
+                                container.islandViewModel.setPillPressed(false)
+                            }
+                            if (isDownOnPill && !isLongPressTriggered && !isSwipeDownHandled) {
                                 val duration = System.currentTimeMillis() - startTime
                                 val dx = kotlin.math.abs(event.rawX - startRawX)
                                 val dy = kotlin.math.abs(event.rawY - startRawY)
@@ -417,13 +422,17 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
                                     }
                                 }
                             }
+                            isDownOnPill = false
                             isLongPressTriggered = false
                             isSwipeDownHandled = false
                             return true
                         }
                         MotionEvent.ACTION_CANCEL -> {
                             longPressHandler.removeCallbacks(longPressRunnable)
-                            container.islandViewModel.setPillPressed(false)
+                            if (isDownOnPill) {
+                                container.islandViewModel.setPillPressed(false)
+                            }
+                            isDownOnPill = false
                             isLongPressTriggered = false
                             isSwipeDownHandled = false
                             return true
@@ -434,30 +443,30 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
                 if (!state.isFaceUnlockActive) {
                     val idleWidthPx = 104f * d
                     val idleHeightPx = 46f * d
-                    val currentW = if (width > 0) width.toFloat() else idleWidthPx
+                    val currentW = if (width > 0) width.toFloat() else (400f * d)
                     val pillLeft = (currentW - idleWidthPx) / 2f
                     val pillRight = (currentW + idleWidthPx) / 2f
                     val isTouchOnIdlePill = event.x in pillLeft..pillRight && event.y in 0f..idleHeightPx
 
                     when (event.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
-                            if (!isTouchOnIdlePill) {
-                                return false
-                            }
                             startRawX = event.rawX
                             startRawY = event.rawY
                             startTime = System.currentTimeMillis()
                             isSwipeDownHandled = false
-                            container.islandViewModel.setPillPressed(true)
+                            isDownOnPill = isTouchOnIdlePill
+                            if (isTouchOnIdlePill) {
+                                container.islandViewModel.setPillPressed(true)
+                            }
                             return true
                         }
                         MotionEvent.ACTION_MOVE -> {
                             val dx = event.rawX - startRawX
                             val dy = event.rawY - startRawY
-                            if (kotlin.math.abs(dx) > touchSlop || kotlin.math.abs(dy) > touchSlop) {
+                            if (isDownOnPill && (kotlin.math.abs(dx) > touchSlop || kotlin.math.abs(dy) > touchSlop)) {
                                 container.islandViewModel.setPillPressed(false)
                             }
-                            if (!isSwipeDownHandled && dy > touchSlop * 2f && dy > kotlin.math.abs(dx) * 1.3f) {
+                            if (!isSwipeDownHandled && dy > touchSlop * 1.5f && dy > kotlin.math.abs(dx) * 1.2f) {
                                 isSwipeDownHandled = true
                                 performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
                             }
@@ -466,18 +475,22 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
                         MotionEvent.ACTION_UP -> {
                             val dx = kotlin.math.abs(event.rawX - startRawX)
                             val dy = kotlin.math.abs(event.rawY - startRawY)
-                            val isTap = !isSwipeDownHandled && isTouchOnIdlePill && dx <= touchSlop * 1.5f && dy <= touchSlop * 1.5f
+                            val isTap = isDownOnPill && !isSwipeDownHandled && isTouchOnIdlePill && dx <= touchSlop * 1.5f && dy <= touchSlop * 1.5f
                             if (isTap) {
                                 HapticFeedbackHelper.performIslandBounceFeedback(this@PixelIslandAccessibilityService, this)
                                 container.islandViewModel.triggerIdleBounce()
-                            } else {
+                            } else if (isDownOnPill) {
                                 container.islandViewModel.setPillPressed(false)
                             }
+                            isDownOnPill = false
                             isSwipeDownHandled = false
                             return true
                         }
                         MotionEvent.ACTION_CANCEL -> {
-                            container.islandViewModel.setPillPressed(false)
+                            if (isDownOnPill) {
+                                container.islandViewModel.setPillPressed(false)
+                            }
+                            isDownOnPill = false
                             isSwipeDownHandled = false
                             return true
                         }
@@ -525,7 +538,7 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
                         pendingTargetWidth = null
                         pendingTargetHeight = null
                         val density = resources.displayMetrics.density
-                        val targetW = if (s.isMusicActive) (196 * density).toInt() else (400 * density).toInt()
+                        val targetW = (400 * density).toInt()
                         val targetH = if (s.isMusicActive) (48 * density).toInt() else (104 * density).toInt()
                         overlayLayoutParams.width = targetW
                         overlayLayoutParams.height = targetH
@@ -642,7 +655,7 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
                 targetFlags = baseFlags or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
             }
             state.isMusicActive -> {
-                targetWindowWidth = (196 * density).toInt()
+                targetWindowWidth = (400 * density).toInt()
                 targetWindowHeight = (48 * density).toInt()
                 targetFlags = baseFlags
             }
@@ -652,7 +665,7 @@ class PixelIslandAccessibilityService : AccessibilityService(), LifecycleOwner, 
                 targetFlags = baseFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             }
             else -> {
-                targetWindowWidth = (116 * density).toInt()
+                targetWindowWidth = (400 * density).toInt()
                 targetWindowHeight = (46 * density).toInt()
                 targetFlags = baseFlags
             }
